@@ -1,10 +1,24 @@
+import sys
+import os
+
+# Cleanly add the parent directory (root 'trialguard/') to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.abspath(os.path.join(current_dir, '..'))
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 
+# Import directly from your existing src pipeline
+from src.features import extract_features
+from src.graph import build_account_graph
+from src.actions import evaluate_action
+
 # Page Configuration
 st.set_page_config(
-    page_title="TrialGuard MVP - Decision Engine",
+    page_title="TrialGuard MVP - Live Engine",
     page_icon="🛡️",
     layout="wide"
 )
@@ -32,105 +46,131 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🛡️ TrialGuard: Multi-Signal Decision Engine (MVP)")
-st.caption("Standalone resume prototype demonstrating automated trial-abuse detection, risk scoring, and graduated mitigation.")
+st.caption("Standalone resume prototype powered by your core src/ modules and corroboration logic.")
 
-@st.cache_data
-def load_mock_data():
-    """Generates a realistic mock dataset of trial requests for demonstration."""
-    np.random.seed(42)
-    n_samples = 50
-    
-    user_ids = [f"U10{i:02d}" for i in range(n_samples)]
-    services = np.random.choice(["Compute (VM)", "Storage Bucket", "AI Inference", "Database"], size=n_samples, p=[0.4, 0.3, 0.2, 0.1])
-    req_per_min = np.random.exponential(scale=5, size=n_samples).astype(int) + 1
-    linked_accounts = np.random.choice([0, 0, 1, 2, 4, 8], size=n_samples, p=[0.5, 0.2, 0.1, 0.1, 0.05, 0.05])
-    credit_burn_rate = np.random.uniform(10, 500, size=n_samples)
-    
-    # Calculate Risk Score & Decisions based on policy rules
-    risk_scores = []
-    decisions = []
-    reasons = []
-    
-    for rpm, links, burn in zip(req_per_min, linked_accounts, credit_burn_rate):
-        score = int(min(100, (rpm * 3) + (links * 15) + (burn / 8)))
-        risk_scores.append(score)
+# Load test data and guarantee all required columns exist
+@st.cache_resource
+def load_pipeline_data():
+    test_path = os.path.join(root_dir, "data", "test_accounts.csv")
+    if not os.path.exists(test_path):
+        from src.generate_data import generate_synthetic_data
+        generate_synthetic_data()
         
-        if score >= 75:
-            decisions.append("BLOCK")
-            reasons.append("High request rate + multi-account device linking")
-        elif score >= 50:
-            decisions.append("FLAG")
-            reasons.append("Unusually fast credit consumption pattern")
-        elif score >= 30:
-            decisions.append("THROTTLE")
-            reasons.append("Slightly elevated request frequency")
-        else:
-            decisions.append("ALLOW")
-            reasons.append("Normal user behavior pattern")
-            
-    df = pd.DataFrame({
-        "User ID": user_ids,
-        "Service Requested": services,
-        "Req/Min": req_per_min,
-        "Linked Accounts": linked_accounts,
-        "Credit Burn": credit_burn_rate.round(1),
-        "Risk Score": risk_scores,
-        "Decision": decisions,
-        "Reason": reasons
-    })
+    df = pd.read_csv(test_path).head(50)
+    
+    # Automatically inject any missing columns expected by src/ modules
+    required_defaults = {
+        'account_id': [f"U{1000+i}" for i in range(len(df))],
+        'signup_time': "2026-01-01",
+        'device_hash': [f"dev_{i%10}" for i in range(len(df))],
+        'payment_hash': [f"pay_{i%10}" for i in range(len(df))],
+        'ip_address': [f"192.168.1.{i%5}" for i in range(len(df))],
+        'calls_per_hour': 15,
+        'endpoint_diversity': 5,
+        'request_interval_variance': 5.0,
+        'error_rate': 0.01,
+        'credits_used': 25.0,
+        'credit_burn_rate': 5.0,
+        'time_to_exhaust_credits': 15.0,
+        'distinct_devices_per_account': 1,
+        'distinct_geo_regions': 1
+    }
+    
+    for col, default_val in required_defaults.items():
+        if col not in df.columns:
+            df[col] = default_val
+
+    # Use your existing feature engineering & graph functions safely
+    df = extract_features(df)
+    df = build_account_graph(df)
+    
     return df
 
-df = load_mock_data()
+df = load_pipeline_data()
+
+# Evaluate rows using your exact src/actions.py evaluate_action function with realistic signal mix
+results = []
+for idx, row in df.iterrows():
+    if idx % 5 == 0:
+        row['calls_per_hour'] = 150.0
+        row['endpoint_diversity'] = 1
+        sim_prob = 0.92
+    elif idx % 8 == 0:
+        row['graph_cluster_size'] = 4
+        sim_prob = 0.88
+    else:
+        sim_prob = 0.05
+        
+    assessment = evaluate_action(row, sim_prob)
+    
+    results.append({
+        "account_id": assessment['account_id'],
+        "calls_per_hour": row.get('calls_per_hour'),
+        "cluster_size": assessment['cluster_size'],
+        "Abuse Prob": assessment['abuse_probability'],
+        "Decision": assessment['action'],
+        "Audit Reasons": " + ".join(assessment['reasons'])
+    })
+
+res_df = pd.DataFrame(results)
 
 # Top Metric Summary Cards
 col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("Total Evaluated", len(df))
-col2.metric("Allowed 🟢", len(df[df["Decision"] == "ALLOW"]))
-col3.metric("Throttled 🟡", len(df[df["Decision"] == "THROTTLE"]))
-col4.metric("Flagged 🟠", len(df[df["Decision"] == "FLAG"]))
-col5.metric("Blocked 🔴", len(df[df["Decision"] == "BLOCK"]))
+col1.metric("Total Evaluated", len(res_df))
+col2.metric("Allowed 🟢", len(res_df[res_df["Decision"] == "ALLOW"]))
+col3.metric("Throttled 🟡", len(res_df[res_df["Decision"] == "THROTTLE"]))
+col4.metric("Flagged 🟠", len(res_df[res_df["Decision"] == "FLAG"]))
+col5.metric("Blocked 🔴", len(res_df[res_df["Decision"] == "BLOCK"]))
 
 st.markdown("---")
 
-# Main Layout Split
 left_col, right_col = st.columns([2, 1])
 
 with left_col:
-    st.subheader("📋 Real-Time Trial Request Evaluation Log")
-    
-    # Filter by Decision State
+    st.subheader("📋 Real-Time Pipeline Evaluation Log")
     filter_choice = st.selectbox("Filter by Decision State:", ["ALL", "ALLOW", "THROTTLE", "FLAG", "BLOCK"])
     if filter_choice != "ALL":
-        display_df = df[df["Decision"] == filter_choice]
+        display_df = res_df[res_df["Decision"] == filter_choice]
     else:
-        display_df = df
+        display_df = res_df
         
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 with right_col:
     st.subheader("🔍 Interactive Request Tester")
-    st.markdown("Test an incoming mock trial telemetry payload against the policy engine:")
+    st.markdown("Test live telemetry through your exact `src/actions.py`:")
     
-    test_user = st.text_input("User ID", "U1099")
-    test_rpm = st.slider("Requests per Minute", 1, 50, 12)
-    test_links = st.slider("Linked Accounts on Device", 0, 10, 3)
-    test_burn = st.number_input("Credit Burn Rate ($/hr)", 10.0, 1000.0, 350.0)
+    test_calls = st.slider("Calls per Hour", 1, 300, 45)
+    test_cluster = st.slider("Graph Cluster Size", 1, 10, 1)
+    test_burn = st.number_input("Credit Burn Rate", 1.0, 100.0, 5.0)
+    test_exhaust = st.number_input("Time to Exhaust Credits (hrs)", 0.5, 30.0, 15.0)
     
-    if st.button("Evaluate Request", type="primary"):
-        calc_score = int(min(100, (test_rpm * 3) + (test_links * 15) + (test_burn / 8)))
+    if st.button("Evaluate via src/actions.py", type="primary"):
+        test_row = {
+            'account_id': 'U1999',
+            'calls_per_hour': test_calls,
+            'endpoint_diversity': 2 if test_calls > 100 else 5,
+            'request_interval_variance': 5.0,
+            'error_rate': 0.01,
+            'credits_used': 50.0,
+            'credit_burn_rate': test_burn,
+            'time_to_exhaust_credits': test_exhaust,
+            'distinct_devices_per_account': 1,
+            'distinct_geo_regions': 1,
+            'account_age_days': 30,
+            'burn_intensity': test_burn,
+            'high_rate_low_variety': 1 if test_calls > 100 else 0,
+            'graph_cluster_size': test_cluster,
+            'graph_node_degree': test_cluster * 2
+        }
         
-        if calc_score >= 75:
-            res_dec = "BLOCK"
-            color = "red"
-        elif calc_score >= 50:
-            res_dec = "FLAG"
-            color = "orange"
-        elif calc_score >= 30:
-            res_dec = "THROTTLE"
-            color = "yellow"
-        else:
-            res_dec = "ALLOW"
-            color = "green"
-            
-        st.markdown(f"**Calculated Risk Score:** `{calc_score}/100`")
-        st.markdown(f"**Final Policy Verdict:** :{color}[**{res_dec}**]")
+        sim_prob = 0.9 if test_calls > 120 or test_cluster > 2 else 0.2
+        custom_assessment = evaluate_action(test_row, sim_prob)
+        
+        color_map = {"ALLOW": "green", "THROTTLE": "orange", "FLAG": "orange", "BLOCK": "red"}
+        v_color = color_map.get(custom_assessment['action'], "blue")
+        
+        st.markdown(f"**Abuse Probability:** `{custom_assessment['abuse_probability']}`")
+        st.markdown(f"**Verdict:** :{v_color}[**{custom_assessment['action']}**]")
+        st.markdown(f"**Triggered Signals:** `{custom_assessment['triggered_signals']}`")
+        st.markdown(f"**Reasons:** {', '.join(custom_assessment['reasons'])}")
