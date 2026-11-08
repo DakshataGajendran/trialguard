@@ -1,0 +1,10 @@
+numpy
+pandas
+scikit-learn
+xgboost
+networkx
+fastapi
+uvicorn
+pydantic
+matplotlib
+pytest
