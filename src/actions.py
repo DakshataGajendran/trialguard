@@ -1,5 +1,10 @@
-
 import pandas as pd
+
+
+# ==========================================================
+# 1. CENTRAL DECISION ENGINE
+# ==========================================================
+
 def evaluate_action(
     row,
     model_prob=None,
@@ -53,7 +58,7 @@ def evaluate_action(
         get_value("endpoint_diversity", 0)
     )
 
-    # IP-only sharing is not considered strong evidence.
+    # IP-only sharing is not strong evidence.
     graph_risk = shared_device_count > 0
 
     credit_risk = (
@@ -74,10 +79,14 @@ def evaluate_action(
     reasons = []
 
     if model_prob >= 0.85:
-        reasons.append("High ML abuse probability.")
+        reasons.append(
+            "High ML abuse probability."
+        )
 
     elif model_prob >= 0.65:
-        reasons.append("Elevated ML abuse probability.")
+        reasons.append(
+            "Elevated ML abuse probability."
+        )
 
     if anomaly_detected:
         reasons.append(
@@ -104,7 +113,7 @@ def evaluate_action(
             "High API request rate with low endpoint diversity."
         )
 
-    # Require several independent indicators before BLOCK.
+    # Require multiple indicators before blocking.
     strong_device_evidence = shared_device_count >= 1
 
     independent_evidence = sum([
@@ -118,12 +127,14 @@ def evaluate_action(
         and independent_evidence >= 2
         and strong_device_evidence
     ):
+
         action = "BLOCK"
 
     elif (
         model_prob >= 0.85
         or independent_evidence >= 2
     ):
+
         action = "FLAG"
 
     elif (
@@ -132,9 +143,11 @@ def evaluate_action(
         or graph_risk
         or bot_risk
     ):
+
         action = "THROTTLE"
 
     else:
+
         action = "ALLOW"
 
     if not reasons:
@@ -150,15 +163,27 @@ def evaluate_action(
     }
 
 
+# ==========================================================
+# 2. RUN DECISION ENGINE ON TEST DATA
+# ==========================================================
+
 def run_action_engine():
 
     from pathlib import Path
+
+    # Local import avoids unnecessary module-level coupling.
+    from .models import predict_accounts
 
     project_root = Path(__file__).resolve().parent.parent
 
     test_path = (
         project_root / "data" / "test_accounts.csv"
     )
+
+    if not test_path.exists():
+        raise FileNotFoundError(
+            f"Test dataset not found: {test_path}"
+        )
 
     test_df = pd.read_csv(test_path)
 
@@ -189,5 +214,10 @@ def run_action_engine():
     return results_df
 
 
+# ==========================================================
+# 3. MAIN EXECUTION
+# ==========================================================
+
 if __name__ == "__main__":
+
     run_action_engine()
