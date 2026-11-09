@@ -1,5 +1,59 @@
-﻿/.venv/
-/__pycache__/
-/.pytest_cache/
+﻿
+# ==============================
+# Python virtual environment
+# ==============================
+.venv/
+venv/
+env/
+
+# ==============================
+# Python cache files
+# ==============================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ==============================
+# Pytest cache
+# ==============================
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ==============================
+# Generated datasets and plots
+# ==============================
 data/*.csv
 plots/*.png
+
+# ==============================
+# IDE and editor settings
+# ==============================
+.vscode/
+.idea/
+
+# ==============================
+# Operating system files
+# ==============================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==============================
+# Logs and temporary files
+# ==============================
+*.log
+*.tmp
+*.temp
+
+# ==============================
+# Jupyter Notebook
+# ==============================
+.ipynb_checkpoints/
+
+# ==============================
+# Environment variables / secrets
+# ==============================
+.env
+.env.*
+!.env.example
