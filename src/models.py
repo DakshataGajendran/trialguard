@@ -1,3 +1,4 @@
+
 from pathlib import Path
 
 import joblib
@@ -11,20 +12,28 @@ from sklearn.metrics import (
     f1_score,
     accuracy_score
 )
+
 from xgboost import XGBClassifier
 
 from .features import extract_features
 from .graph import build_account_graph
 
 
-# Project paths
+# ==========================================
+# PROJECT PATHS
+# ==========================================
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 DATA_DIR = PROJECT_ROOT / "data"
 MODEL_DIR = PROJECT_ROOT / "model_artifacts"
 MODEL_PATH = MODEL_DIR / "trialguard_models.joblib"
 
 
-# Same feature columns must be used during training and prediction
+# ==========================================
+# FEATURE COLUMNS
+# ==========================================
+
 FEATURE_COLS = [
     "calls_per_hour",
     "endpoint_diversity",
@@ -43,35 +52,47 @@ FEATURE_COLS = [
 ]
 
 
+# ==========================================
+# FEATURE PREPARATION
+# ==========================================
+
 def prepare_features(df):
     """
-    Apply the same feature engineering and graph analysis
-    used during model training.
+    Extract engineered and graph features.
+
+    Returns:
+        processed_df: Processed account DataFrame.
+        X: Numeric model-ready feature DataFrame.
     """
-    df = extract_features(df.copy())
-    df = build_account_graph(df)
 
-    # Ensure consistent feature columns and numeric values
-    X = df.reindex(columns=FEATURE_COLS)
+    processed_df = extract_features(df.copy())
+
+    processed_df = build_account_graph(processed_df)
+
+    X = processed_df.reindex(columns=FEATURE_COLS)
+
     X = X.apply(pd.to_numeric, errors="coerce")
-    X = X.replace([np.inf, -np.inf], np.nan).fillna(0)
 
-    return df, X
+    X = (
+        X.replace([np.inf, -np.inf], np.nan)
+        .fillna(0)
+    )
 
+    return processed_df, X
+
+
+# ==========================================
+# MODEL TRAINING AND EVALUATION
+# ==========================================
 
 def train_and_evaluate():
-    """
-    Train XGBoost and Isolation Forest,
-    evaluate them, and save both models.
-    """
 
     train_path = DATA_DIR / "train_accounts.csv"
     test_path = DATA_DIR / "test_accounts.csv"
 
     if not train_path.exists() or not test_path.exists():
         raise FileNotFoundError(
-            "Training or testing CSV is missing. "
-            "Generate the dataset first."
+            "Training or testing CSV is missing."
         )
 
     train_df = pd.read_csv(train_path)
@@ -83,7 +104,7 @@ def train_and_evaluate():
     if "is_abuser" not in test_df.columns:
         raise ValueError("Testing data must contain is_abuser.")
 
-    # Feature engineering and graph analysis
+    # Prepare features
     _, X_train = prepare_features(train_df)
     _, X_test = prepare_features(test_df)
 
@@ -95,10 +116,13 @@ def train_and_evaluate():
         contamination=0.15,
         random_state=42
     )
+
     iso_model.fit(X_train)
 
     iso_predictions = np.where(
-        iso_model.predict(X_test) == -1, 1, 0
+        iso_model.predict(X_test) == -1,
+        1,
+        0
     )
 
     # Train XGBoost
@@ -106,7 +130,7 @@ def train_and_evaluate():
     abuse_count = int((y_train == 1).sum())
 
     if abuse_count == 0:
-        raise ValueError("Training data contains no abuser examples.")
+        raise ValueError("No abuser examples found in training data.")
 
     scale_pos_weight = normal_count / abuse_count
 
@@ -120,30 +144,35 @@ def train_and_evaluate():
 
     xgb_predictions = xgb_model.predict(X_test)
 
-    # Evaluate both models
-    print("\n--- TrialGuard Model Evaluation ---")
+    # Evaluate models
+    print("\n========== TRIALGUARD MODEL EVALUATION ==========")
 
     for name, predictions in [
         ("Isolation Forest", iso_predictions),
         ("XGBoost", xgb_predictions)
     ]:
+
         print(f"\n{name}")
+
         print(
             "Accuracy:",
             round(accuracy_score(y_test, predictions), 4)
         )
+
         print(
             "Precision:",
             round(precision_score(
                 y_test, predictions, zero_division=0
             ), 4)
         )
+
         print(
             "Recall:",
             round(recall_score(
                 y_test, predictions, zero_division=0
             ), 4)
         )
+
         print(
             "F1 Score:",
             round(f1_score(
@@ -151,7 +180,7 @@ def train_and_evaluate():
             ), 4)
         )
 
-    # Save both trained models and their feature configuration
+    # Save models
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
     model_bundle = {
@@ -167,27 +196,31 @@ def train_and_evaluate():
     return model_bundle
 
 
+# ==========================================
+# LOAD SAVED MODELS
+# ==========================================
+
 def load_models():
-    """Load previously trained models from disk."""
 
     if not MODEL_PATH.exists():
         raise FileNotFoundError(
             "Trained models not found. "
-            "Run: python -m src.models"
+            "Run python -m src.models first."
         )
 
     return joblib.load(MODEL_PATH)
 
 
+# ==========================================
+# ACCOUNT PREDICTION
+# ==========================================
+
 def predict_accounts(df):
     """
-    Generate predictions using the saved trained models.
+    Generate predictions using saved models.
 
-    Returns:
-        DataFrame containing:
-        - abuse_probability: XGBoost probability
-        - xgb_prediction: XGBoost classification
-        - anomaly_detected: Isolation Forest result
+    Returns a DataFrame containing:
+    abuse_probability, xgb_prediction and anomaly_detected.
     """
 
     models = load_models()
@@ -198,10 +231,13 @@ def predict_accounts(df):
     iso_model = models["iso_model"]
 
     probabilities = xgb_model.predict_proba(X)[:, 1]
+
     xgb_predictions = xgb_model.predict(X)
 
     iso_predictions = np.where(
-        iso_model.predict(X) == -1, 1, 0
+        iso_model.predict(X) == -1,
+        1,
+        0
     )
 
     results = processed_df.copy()
@@ -212,6 +248,10 @@ def predict_accounts(df):
 
     return results
 
+
+# ==========================================
+# MAIN EXECUTION
+# ==========================================
 
 if __name__ == "__main__":
     train_and_evaluate()
