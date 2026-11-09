@@ -22,7 +22,7 @@ def test_graph_detects_shared_device():
     assert account_two["shared_device_count"] > 0
 
 
-def test_graph_detects_shared_payment():
+def test_graph_does_not_use_payment_for_detection():
     data = pd.DataFrame({
         "account_id": ["A001", "A002"],
         "device_hash": ["DEVICE_1", "DEVICE_2"],
@@ -33,8 +33,7 @@ def test_graph_detects_shared_payment():
     result = build_account_graph(data)
 
     assert "shared_payment_count" in result.columns
-
-    assert result["shared_payment_count"].sum() > 0
+    assert result["shared_payment_count"].sum() == 0
 
 
 def test_graph_returns_cluster_information():
